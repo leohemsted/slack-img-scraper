@@ -1,10 +1,9 @@
-import nox
+import nox_poetry as nox
 
 
 @nox.session(python="3.9")
 def tests(session):
-    session.install("poetry")
-    session.run("poetry", "install", external=True)
+    session.install("pytest")
     session.run("pytest")
 
 
