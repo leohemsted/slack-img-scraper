@@ -1,4 +1,2 @@
 slack-img-scraper
 =================
-
-
