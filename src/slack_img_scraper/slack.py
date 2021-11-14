@@ -38,13 +38,23 @@ class SlackImageDownloader:
         username = user.get("real_name", user["name"]).lower().replace(" ", "-")
         return f"{channel['name']}-{dt.date().isoformat()}-{username}-{file['timestamp']}.{file['filetype']}"
 
-    def get_image_files_for_history(self, channel, history):
+    def get_image_files_for_history(self, channel, history, is_thread=False):
         for message in history["messages"]:
             if "files" in message:
                 for file in message["files"]:
                     if file["mimetype"].startswith("image"):
                         print("found file", file["private_url"])
                         yield file
+            # the first message in a thread is the thread starter, we don't want to recurse if we're inside
+            # the thread already so set a flag
+            if not is_thread and "thread_ts" in message:
+                print("diving into a thread")
+                thread_history = self.client.conversations_replies(
+                    channel=channel["id"], ts=message["thread_ts"]
+                )
+                yield from self.get_image_files_for_history(
+                    channel, thread_history, is_thread=True
+                )
         if history["has_more"]:
             print("more to come!")
 
