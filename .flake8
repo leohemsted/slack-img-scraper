@@ -10,3 +10,5 @@ exclude =
     .git
     .nox
     .pytest_cache
+
+import-order-style = google 

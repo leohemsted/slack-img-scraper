@@ -13,6 +13,7 @@ authors = ["Leo Hemsted <leohemsted@gmail.com>"]
 python = "^3.7"
 slack-sdk = "^3.11.2"
 httpx = "^0.19.0"
+click = "^8.0.3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
@@ -20,6 +21,13 @@ flake8 = "^3.9.2"
 flake8-bugbear = "^21.9.1"
 black = "^21.9b0"
 isort = "^5.9.3"
+ipython = "^7.29.0"
+pdbpp = "^0.10.3"
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+src_paths = ["src", "test"]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
