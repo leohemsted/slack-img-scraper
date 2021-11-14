@@ -12,5 +12,6 @@ __pycache__/
 
 .pytest_cache
 .nox
-
 environment.sh
+
+output
