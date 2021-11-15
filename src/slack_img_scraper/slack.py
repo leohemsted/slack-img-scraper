@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+import yaml
 from slack_sdk import WebClient
 
 CHANNELS_TO_ARCHIVE = {"leo-bot-test-channel"}
@@ -13,6 +14,8 @@ DOWNLOAD_PATH = Path("output")
 
 class SlackImageDownloader:
     def __init__(self):
+        with open("config.yml") as config:
+            self.config = yaml.load(config)
         self.client = WebClient(token=os.environ["SLACK_TOKEN"])
         self.users = {
             x["id"]: x for page in self.client.users_list() for x in page["members"]
@@ -23,6 +26,7 @@ class SlackImageDownloader:
             for channel in page["channels"]
             # skip DMs etc
             if channel["is_channel"]
+            and channel["name"] not in config["channels_to_skip"]
         }
 
         with open(".last-run-ts.txt", "r") as last_run_f:
@@ -33,7 +37,6 @@ class SlackImageDownloader:
         for name_to_archive in CHANNELS_TO_ARCHIVE:
             channel = self.channels[name_to_archive]
             for local_filename, remote_url in self.get_image_urls_for_channel(channel):
-                print(f"1 - {local_filename}")
                 tasks.append(
                     asyncio.create_task(self.download_file(local_filename, remote_url))
                 )
@@ -51,9 +54,11 @@ class SlackImageDownloader:
         return f"{channel['name']}-{dt.date().isoformat()}-{username}-{file['timestamp']}.{file['filetype']}"
 
     def get_image_files_for_history(self, channel, history, is_thread=False):
-        for page in history:
-            for message in page["messages"]:
-                yield from self.get_image_files_for_message(message, channel, is_thread)
+        yield from (
+            self.get_image_files_for_message(message, channel, is_thread)
+            for page in history
+            for message in page["messages"]
+        )
 
     def get_image_files_for_message(self, message, channel, is_thread):
         # the first message in a thread is the thread starter, we don't want to recurse
@@ -73,12 +78,12 @@ class SlackImageDownloader:
 
         # if the message is older than the last time we ran, then we don't need to
         # re-download the files from it
-        if message["ts"] > self.last_run_ts:
-            if "files" in message:
-                for file in message["files"]:
-                    if file["mimetype"].startswith("image"):
-                        print("found file", file["url_private"])
-                        yield file
+        if message["ts"] > self.last_run_ts and "files" in message:
+            yield from (
+                file
+                for file in message["files"]
+                if file["mimetype"].startswith("image")
+            )
 
     def get_image_urls_for_channel(self, channel):
         # can't filter on old messages here in case there are new images inside threads
@@ -89,9 +94,9 @@ class SlackImageDownloader:
             yield (local_filename, file["url_private"])
 
     async def download_file(self, local_filename, remote_url):
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as httpx_client:
             print(f"2 - {local_filename}")
-            resp = await client.get(
+            resp = await httpx_client.get(
                 remote_url,
                 headers={"Authorization": f"Bearer {self.client.token}"},
             )
