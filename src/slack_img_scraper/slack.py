@@ -1,9 +1,8 @@
-import logging
+import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
 
-import click
 import httpx
 from slack_sdk import WebClient
 
@@ -15,10 +14,13 @@ DOWNLOAD_PATH = Path("output")
 class SlackImageDownloader:
     def __init__(self):
         self.client = WebClient(token=os.environ["SLACK_TOKEN"])
-        self.users = {x["id"]: x for x in self.client.users_list()["members"]}
+        self.users = {
+            x["id"]: x for page in self.client.users_list() for x in page["members"]
+        }
         self.channels = {
             channel["name"]: channel
-            for channel in self.client.conversations_list()["channels"]
+            for page in self.client.conversations_list()
+            for channel in page["channels"]
             # skip DMs etc
             if channel["is_channel"]
         }
@@ -26,11 +28,16 @@ class SlackImageDownloader:
         with open(".last-run-ts.txt", "r") as last_run_f:
             self.last_run_ts = last_run_f.read()
 
-    def download_images(self):
+    async def download_images(self):
+        tasks = []
         for name_to_archive in CHANNELS_TO_ARCHIVE:
             channel = self.channels[name_to_archive]
-            self.get_images_for_channel(channel)
-
+            for local_filename, remote_url in self.get_image_urls_for_channel(channel):
+                print(f"1 - {local_filename}")
+                tasks.append(
+                    asyncio.create_task(self.download_file(local_filename, remote_url))
+                )
+        await asyncio.gather(*tasks)
         with open(".last-run-ts.txt", "w") as last_run_f:
             last_run_f.write(str(datetime.utcnow().timestamp()))
 
@@ -44,52 +51,56 @@ class SlackImageDownloader:
         return f"{channel['name']}-{dt.date().isoformat()}-{username}-{file['timestamp']}.{file['filetype']}"
 
     def get_image_files_for_history(self, channel, history, is_thread=False):
-        for message in history["messages"]:
-            # the first message in a thread is the thread starter, we don't want to
-            # recurse if we're inside the thread already so set a flag
-            if not is_thread and "thread_ts" in message:
-                print(message["latest_reply"], self.last_run_ts)
-                if message["latest_reply"] >= self.last_run_ts:
-                    print("start thread")
-                    thread_history = self.client.conversations_replies(
-                        channel=channel["id"],
-                        ts=message["thread_ts"],
-                        oldest=self.last_run_ts,
-                    )
-                    yield from self.get_image_files_for_history(
-                        channel, thread_history, is_thread=True
-                    )
-                    print("finish thread")
+        for page in history:
+            for message in page["messages"]:
+                yield from self.get_image_files_for_message(message, channel, is_thread)
 
-            # if the message is older than the last time we ran, then we don't need to
-            # re-download the files from it
-            if message["ts"] > self.last_run_ts:
-                if "files" in message:
-                    for file in message["files"]:
-                        if file["mimetype"].startswith("image"):
-                            print("found file", file["url_private"])
-                            yield file
-        if history["has_more"]:
-            print("more to come!")
+    def get_image_files_for_message(self, message, channel, is_thread):
+        # the first message in a thread is the thread starter, we don't want to recurse
+        # if we're inside the thread already so set a flag
+        if not is_thread and "thread_ts" in message:
+            if message["latest_reply"] >= self.last_run_ts:
+                print("start thread")
+                thread_history = self.client.conversations_replies(
+                    channel=channel["id"],
+                    ts=message["thread_ts"],
+                    oldest=self.last_run_ts,
+                )
+                yield from self.get_image_files_for_history(
+                    channel, thread_history, is_thread=True
+                )
+                print("finish thread")
 
-    def get_images_for_channel(self, channel):
+        # if the message is older than the last time we ran, then we don't need to
+        # re-download the files from it
+        if message["ts"] > self.last_run_ts:
+            if "files" in message:
+                for file in message["files"]:
+                    if file["mimetype"].startswith("image"):
+                        print("found file", file["url_private"])
+                        yield file
+
+    def get_image_urls_for_channel(self, channel):
         # can't filter on old messages here in case there are new images inside threads
         # that are replies to old messages
         history = self.client.conversations_history(channel=channel["id"])
         for file in self.get_image_files_for_history(channel, history):
             local_filename = self.get_local_filename_for_file(channel, file)
-            resp = httpx.get(
-                file["url_private"],
+            yield (local_filename, file["url_private"])
+
+    async def download_file(self, local_filename, remote_url):
+        async with httpx.AsyncClient() as client:
+            print(f"2 - {local_filename}")
+            resp = await client.get(
+                remote_url,
                 headers={"Authorization": f"Bearer {self.client.token}"},
             )
-            resp.raise_for_status()
+        resp.raise_for_status()
 
-            # if there's an issue with auth, slack will redirect to a login
-            if "image" not in resp.headers["content-type"]:
-                raise ValueError(
-                    f"Couldn't download {file['url_private']} to {local_filename}"
-                )
+        # if there's an issue with auth, slack will redirect to a login
+        if "image" not in resp.headers["content-type"]:
+            raise ValueError(f"Couldn't download {remote_url} to {local_filename}")
 
-            with open(DOWNLOAD_PATH / local_filename, "wb") as img_file:
-                print(f"writing to {local_filename}")
-                img_file.write(resp.content)
+        with open(DOWNLOAD_PATH / local_filename, "wb") as img_file:
+            print(f"writing to {local_filename}")
+            img_file.write(resp.content)
