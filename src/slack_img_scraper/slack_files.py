@@ -13,7 +13,7 @@ DOWNLOAD_PATH = Path("output")
 
 class SlackImageDownloader:
     def __init__(self):
-        self.client = WebClient(token=os.environ["SLACK_TOKEN"])
+        self.client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
         self.users = {
             x["id"]: x for page in self.client.users_list() for x in page["members"]
         }
@@ -51,7 +51,7 @@ class SlackImageDownloader:
         channel = (
             self.channels[file["channels"][0]]
             if file.get("channels", [])
-            else "unknown-channel"
+            else {"name": "unknown-channel"}
         )
         dt = datetime.fromtimestamp(file["timestamp"])
         user = self.users[file["user"]]
@@ -61,6 +61,7 @@ class SlackImageDownloader:
     async def download_images(self):
         tasks = []
         for file in self.get_files():
+            file["timestamp"]
             remote_url = file["url_private"]
             local_filename = self.get_local_filename_for_file(file)
             print(remote_url, local_filename)
@@ -70,7 +71,7 @@ class SlackImageDownloader:
 
         await asyncio.gather(*tasks)
         with open(".last-run-ts.txt", "w") as last_run_f:
-            last_run_f.write(str(datetime.utcnow().timestamp()))
+            last_run_f.write(str(self.run_start_ts))
 
     async def download_file(self, local_filename, remote_url):
         async with httpx.AsyncClient() as httpx_client:

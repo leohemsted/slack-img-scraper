@@ -16,7 +16,7 @@ class SlackImageDownloader:
     def __init__(self):
         with open("config.yml") as config:
             self.config = yaml.load(config)
-        self.client = WebClient(token=os.environ["SLACK_TOKEN"])
+        self.client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
         self.users = {
             x["id"]: x for page in self.client.users_list() for x in page["members"]
         }
