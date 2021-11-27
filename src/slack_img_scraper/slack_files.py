@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,18 @@ from slack_sdk import WebClient
 CHANNELS_TO_ARCHIVE = {"leo-bot-test-channel"}
 DOWNLOAD_PATH = Path("output")
 # CHANNELS_TO_ARCHIVE = {"chat", "social-rides", "mud", "mallorca"}
+
+# limit number of concurrents
+connection_pool = asyncio.Semaphore(50)
+
+
+class LocalFiles(set):
+    def __init__(self):
+        # assumes channel-date-username-file_id.filetype
+        super().__init__()
+        for _path, _subdirs, files in os.walk(DOWNLOAD_PATH):
+            self.update(file.split(".")[-2].split("-")[-1] for file in files)
+        print(f"Found {len(self)} existing files")
 
 
 class SlackImageDownloader:
@@ -23,6 +36,8 @@ class SlackImageDownloader:
             for channel in page["channels"]
         }
 
+        self.existing_files = LocalFiles()
+
         self.run_start_ts = datetime.utcnow().timestamp()
 
         with open(".last-run-ts.txt", "r") as last_run_f:
@@ -35,18 +50,23 @@ class SlackImageDownloader:
             "ts_to": self.run_start_ts,
         }
         response = self.client.files_list(**kwargs)
+        print(response["paging"])
         yield from response["files"]
-        if response["paging"]["pages"] > 1:
-            for i in range(2, response["paging"]["pages"] + 1):
-                print(f"page {i}")
-                yield from self.client.files_list(
-                    **kwargs,
-                    page=i,
-                )["files"]
+        for i in range(2, response["paging"]["pages"] + 1):
+            response = self.client.files_list(
+                **kwargs,
+                page=i,
+            )
+            print(
+                f"page {i} of {response['paging']['pages']} - can access "
+                f"{len(response['files'])} files out of {response['paging']['count']}"
+            )
+            yield from response["files"]
 
     def get_local_filename_for_file(self, file):
         """
-        channel-date-username-timestamp.filetype
+        returns two vals: folder and filename.
+        channel / date-username-file_id.filetype
         """
         channel = (
             self.channels[file["channels"][0]]
@@ -55,27 +75,33 @@ class SlackImageDownloader:
         )
         dt = datetime.fromtimestamp(file["timestamp"])
         user = self.users[file["user"]]
-        username = user.get("real_name", user["name"]).lower().replace(" ", "-")
-        return f"{channel['name']}-{dt.date().isoformat()}-{username}-{file['timestamp']}.{file['filetype']}"
+        # remove all non-filename-friendly characters from peoples names
+        username = re.sub(r"[^\w\d-]", "_", user.get("real_name", user["name"])).lower()
+        return (
+            f"{channel['name']}",
+            f"{dt.date().isoformat()}-{username}-{file['id']}.{file['filetype']}",
+        )
 
     async def download_images(self):
         tasks = []
         for file in self.get_files():
-            file["timestamp"]
             remote_url = file["url_private"]
-            local_filename = self.get_local_filename_for_file(file)
-            print(remote_url, local_filename)
-            tasks.append(
-                asyncio.create_task(self.download_file(local_filename, remote_url))
-            )
+
+            if file["id"] not in self.existing_files:
+                local_folder, local_filename = self.get_local_filename_for_file(file)
+                print(f"{remote_url} -> {local_folder}/{local_filename}")
+                tasks.append(
+                    asyncio.create_task(
+                        self.download_file(local_folder, local_filename, remote_url)
+                    )
+                )
 
         await asyncio.gather(*tasks)
         with open(".last-run-ts.txt", "w") as last_run_f:
             last_run_f.write(str(self.run_start_ts))
 
-    async def download_file(self, local_filename, remote_url):
-        async with httpx.AsyncClient() as httpx_client:
-            print(f"2 - {local_filename}")
+    async def download_file(self, local_folder, local_filename, remote_url):
+        async with httpx.AsyncClient() as httpx_client, connection_pool:
             resp = await httpx_client.get(
                 remote_url,
                 headers={"Authorization": f"Bearer {self.client.token}"},
@@ -86,6 +112,7 @@ class SlackImageDownloader:
         if "image" not in resp.headers["content-type"]:
             raise ValueError(f"Couldn't download {remote_url} to {local_filename}")
 
-        with open(DOWNLOAD_PATH / local_filename, "wb") as img_file:
-            print(f"writing to {local_filename}")
+        os.makedirs(DOWNLOAD_PATH / local_folder, exist_ok=True)
+        with open(DOWNLOAD_PATH / local_folder / local_filename, "wb") as img_file:
+            print(f"writing to {DOWNLOAD_PATH}/{local_folder}/{local_filename}")
             img_file.write(resp.content)
