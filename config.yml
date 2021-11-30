@@ -1,6 +1,3 @@
-# CHANNELS_TO_ARCHIVE = {"chat", "social-rides", "mud", "mallorca"}
-
-
 channels_to_skip: 
   - gear
   - marketplace
