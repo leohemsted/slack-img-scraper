@@ -3,7 +3,9 @@ from datetime import datetime
 
 import click
 
-from slack_img_scraper.slack import SlackImageDownloader as ChannelDownloader
+from slack_img_scraper.slack_channel_crawler import (
+    SlackImageDownloader as ChannelDownloader,
+)
 from slack_img_scraper.slack_channels import SlackChannelJoiner
 from slack_img_scraper.slack_files import SlackImageDownloader as FileDownloader
 

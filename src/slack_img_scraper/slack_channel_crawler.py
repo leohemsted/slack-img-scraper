@@ -1,3 +1,7 @@
+"""
+Deprecated as the file api is much more convenient. May need to be resurrected if the file API breaks
+"""
+
 import asyncio
 import os
 from datetime import datetime
