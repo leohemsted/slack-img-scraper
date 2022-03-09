@@ -13,8 +13,9 @@ def cli():
 
 
 @cli.command("by-file")
-def download_historical_images_by_file():
-    downloader = FileDownloader()
+@click.option("--s3", type=bool, default=False)
+def download_historical_images_by_file(s3):
+    downloader = FileDownloader(s3=s3)
     asyncio.run(downloader.download_images())
 
 

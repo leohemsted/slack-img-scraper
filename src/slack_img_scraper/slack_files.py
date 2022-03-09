@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import boto3
 import httpx
 import yaml
 from slack_sdk import WebClient
@@ -29,6 +30,7 @@ class SlackImageDownloader:
     def __init__(self, s3):
         with open("config.yml") as config:
             self.config = yaml.load(config, Loader=yaml.SafeLoader)
+        self.s3 = boto3.resource("s3") if s3 else None
         self.client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
         self.users = {
             x["id"]: x for page in self.client.users_list() for x in page["members"]
@@ -44,8 +46,14 @@ class SlackImageDownloader:
 
         self.run_start_ts = datetime.utcnow().timestamp()
 
-        with open(".last-run-ts.txt", "r") as last_run_f:
-            self.last_run_ts = last_run_f.read()
+        self.set_last_run_ts()
+
+    def set_last_run_ts(self):
+        if self.s3:
+            s3 = boto3.resource("s3")
+        else:
+            with open(".last-run-ts.txt", "r") as last_run_f:
+                self.last_run_ts = last_run_f.read()
 
     def get_files(self):
         kwargs = {
