@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+import yaml
 from slack_sdk import WebClient
 
 CHANNELS_TO_ARCHIVE = {"leo-bot-test-channel"}
@@ -25,7 +26,9 @@ class LocalFiles(set):
 
 
 class SlackImageDownloader:
-    def __init__(self):
+    def __init__(self, s3):
+        with open("config.yml") as config:
+            self.config = yaml.load(config, Loader=yaml.SafeLoader)
         self.client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
         self.users = {
             x["id"]: x for page in self.client.users_list() for x in page["members"]
@@ -34,6 +37,7 @@ class SlackImageDownloader:
             channel["id"]: channel
             for page in self.client.conversations_list()
             for channel in page["channels"]
+            if channel["name"] not in self.config["channels_to_skip"]
         }
 
         self.existing_files = LocalFiles()
