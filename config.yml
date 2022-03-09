@@ -1,3 +1,8 @@
 channels_to_skip: 
   - gear
   - marketplace
+  - weather
+
+
+aws:
+  bucket: slack-img-archive
