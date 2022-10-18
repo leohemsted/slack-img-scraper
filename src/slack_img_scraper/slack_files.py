@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import os
 import re
@@ -108,9 +109,14 @@ class SlackImageDownloader:
                     )
                 )
 
-        await asyncio.gather(*tasks)
-        with open(".last-run-ts.txt", "w") as last_run_f:
-            last_run_f.write(str(self.run_start_ts))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        errors = [result for result in results if result is not None]
+        if errors:
+            print("Something went wrong! Take a look at it and try again")
+            sys.exit(1)
+        else:
+            with open(".last-run-ts.txt", "w") as last_run_f:
+                last_run_f.write(str(self.run_start_ts))
 
     async def download_file(self, local_folder, local_filename, remote_url):
         async with httpx.AsyncClient() as httpx_client, connection_pool:
@@ -121,7 +127,11 @@ class SlackImageDownloader:
         resp.raise_for_status()
 
         # if there's an issue with auth, slack will redirect to a login
-        if "image" not in resp.headers["content-type"]:
+        content_type = resp.headers["content-type"]
+        if not ("image" in content_type or "binary" in content_type):
+            print(
+                f"Response headers suggest it's not an image. Status code {resp.status_code}. Headers: {resp.headers}"
+            )
             raise ValueError(f"Couldn't download {remote_url} to {local_filename}")
 
         os.makedirs(DOWNLOAD_PATH / local_folder, exist_ok=True)
