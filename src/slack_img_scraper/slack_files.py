@@ -80,11 +80,17 @@ class SlackImageDownloader:
         """
         returns two vals: folder and filename.
         channel / date-username-file_id.filetype
+
+        assumption: file is shared in at least one channel that we archive. we'll pick
+        the first channel as slack orders them in the api
         """
-        channel = (
-            self.channels[file["channels"][0]]
-            if file.get("channels", [])
-            else {"name": "unknown-channel"}
+        channel = next(
+            (
+                self.channels[channel_id]
+                for channel_id in file.get("channels", [])
+                if channel_id in self.channels
+            ),
+            {"name": "unknown-channel"},
         )
         dt = datetime.fromtimestamp(file["timestamp"])
         user = self.users[file["user"]]
@@ -100,7 +106,15 @@ class SlackImageDownloader:
         for file in self.get_files():
             remote_url = file["url_private"]
 
-            if file["id"] not in self.existing_files:
+            if (
+                # if it's been shared in at least one channel we care about
+                any(
+                    channel_id in self.channels
+                    for channel_id in file.get("channels", [])
+                )
+                # if we haven't downloaded it already
+                and file["id"] not in self.existing_files
+            ):
                 local_folder, local_filename = self.get_local_filename_for_file(file)
                 print(f"{remote_url} -> {local_folder}/{local_filename}")
                 tasks.append(
